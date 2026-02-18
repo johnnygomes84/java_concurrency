@@ -1,0 +1,39 @@
+{
+  "javaVersion": "25",
+  "requestId": "3f3c6f2f-0c1d-4b5a-a67e-3b9e6d9d0c32",
+  "features": {
+    "structuredConcurrency": {
+      "successFanOut": {
+        "tasks": [
+          "profile",
+          "limits",
+          "pricing"
+        ],
+        "result": {
+          "profile": "OK (requestId: 3f3c6f2f-0c1d-4b5a-a67e-3b9e6d9d0c32)",
+          "limits": "OK",
+          "pricing": "OK"
+        }
+      },
+      "failurePropagation": {
+        "failedTask": "pricing",
+        "siblingCancelled": true
+      },
+      "timeout": {
+        "deadlineMs": 200,
+        "completed": [
+          "profile"
+        ],
+        "cancelled": [
+          "limits",
+          "pricing"
+        ]
+      }
+    },
+    "scopedValues": {
+      "visibleInDeepCall": true,
+      "visibleInChildTasks": true
+    }
+  }
+}
+
