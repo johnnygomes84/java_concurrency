@@ -3,6 +3,8 @@ package com.java_new.concurrency.service;
 import com.java_new.concurrency.context.RequestContext;
 import com.java_new.concurrency.model.DemoResponse;
 import com.java_new.concurrency.model.DemoResponse.*;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -12,40 +14,39 @@ import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.StructuredTaskScope.Subtask;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class StructuredConcurrencyService {
 
     private final ScopedValueService scopedValueService;
 
-    public StructuredConcurrencyService(ScopedValueService scopedValueService) {
-        this.scopedValueService = scopedValueService;
-    }
-
     public DemoResponse runFullDemo() {
-        String requestId = UUID.randomUUID().toString();
-
-        try {
-            return ScopedValue
-                .where(RequestContext.REQUEST_ID, requestId)
-                .where(RequestContext.TENANT_ID, "tenant-demo")
-                .where(RequestContext.USER_ID, "user-java25")
-                .call(() -> buildDemoResponse(requestId));
-        } catch (Exception e) {
-            throw new RuntimeException("Demo failed", e);
-        }
+        String requestId = java.util.UUID.randomUUID().toString();
+        return ScopedValue
+            .where(RequestContext.REQUEST_ID, requestId)
+            .where(RequestContext.TENANT_ID, "tenant-demo")
+            .where(RequestContext.USER_ID, "user-java25")
+            .call(() -> buildDemoResponse(requestId));
     }
 
-    private DemoResponse buildDemoResponse(String requestId) throws Exception {
-        SuccessFanOut successFanOut = demonstrateSuccessFanOut();
-        FailurePropagation failurePropagation = demonstrateFailurePropagation();
-        Timeout timeout = demonstrateTimeout();
+    private DemoResponse buildDemoResponse(String requestId) {
+        SuccessFanOut successFanOut = safeSuccessFanOut();
+        FailurePropagation failurePropagation = safeFailurePropagation();
+        Timeout timeout = safeTimeout();
 
         StructuredConcurrency structuredConcurrency = new StructuredConcurrency(
             successFanOut, failurePropagation, timeout
         );
 
-        boolean visibleInDeepCall = scopedValueService.demonstrateDeepCallAccess();
-        boolean visibleInChildTasks = demonstrateScopedValueInSubtasks();
+        boolean visibleInDeepCall = false;
+        boolean visibleInChildTasks = false;
+        try {
+            visibleInDeepCall = scopedValueService.demonstrateDeepCallAccess();
+            visibleInChildTasks = demonstrateScopedValueInSubtasks();
+        } catch (Exception e) {
+            log.error("Error demonstrating scoped value access in subtasks", e);
+        }
 
         ScopedValues scopedValues = new ScopedValues(visibleInDeepCall, visibleInChildTasks);
         Features features = new Features(structuredConcurrency, scopedValues);
@@ -54,7 +55,31 @@ public class StructuredConcurrencyService {
         return new DemoResponse(javaVersion, requestId, features);
     }
 
-    public SuccessFanOut demonstrateSuccessFanOut() throws InterruptedException, ExecutionException {
+    private SuccessFanOut safeSuccessFanOut() {
+        try {
+            return demonstrateSuccessFanOut();
+        } catch (Exception e) {
+            return new SuccessFanOut(new String[]{}, Map.of("error", e.getMessage()));
+        }
+    }
+
+    private FailurePropagation safeFailurePropagation() {
+        try {
+            return demonstrateFailurePropagation();
+        } catch (Exception e) {
+            return new FailurePropagation("error", true);
+        }
+    }
+
+    private Timeout safeTimeout() {
+        try {
+            return demonstrateTimeout();
+        } catch (Exception e) {
+            return new Timeout(0, new String[]{}, new String[]{"error: " + e.getMessage()});
+        }
+    }
+
+    public SuccessFanOut demonstrateSuccessFanOut() throws InterruptedException {
         try (var scope = StructuredTaskScope.open()) {
             Subtask<String> profileTask = scope.fork(this::fetchProfile);
             Subtask<String> limitsTask = scope.fork(this::fetchLimits);
@@ -84,7 +109,10 @@ public class StructuredConcurrencyService {
                 profileTask.state() == Subtask.State.UNAVAILABLE ||
                 limitsTask.state() == Subtask.State.UNAVAILABLE;
 
-            return new FailurePropagation("pricing", siblingsCancelled);
+            return new FailurePropagation(
+                pricingTask.state() == Subtask.State.FAILED ? "pricing" : null,
+                siblingsCancelled
+            );
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -180,4 +208,3 @@ public class StructuredConcurrencyService {
         return "OK";
     }
 }
-

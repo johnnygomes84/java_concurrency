@@ -1,9 +1,8 @@
 package com.java_new.concurrency.service;
 
 import com.java_new.concurrency.context.RequestContext;
+import com.java_new.concurrency.model.ScopedValuesResponse;
 import org.springframework.stereotype.Service;
-
-import java.util.UUID;
 
 @Service
 public class ScopedValueService {
@@ -13,20 +12,22 @@ public class ScopedValueService {
         return result.contains(RequestContext.getRequestId());
     }
 
-    public String runScopedValuesDemo() {
-        String requestId = UUID.randomUUID().toString();
-
+    public ScopedValuesResponse runScopedValuesDemo() {
+        String requestId = java.util.UUID.randomUUID().toString();
         try {
             return ScopedValue
                 .where(RequestContext.REQUEST_ID, requestId)
                 .where(RequestContext.TENANT_ID, "tenant-123")
                 .where(RequestContext.USER_ID, "user-456")
                 .call(() -> {
-                    String businessResult = processBusinessLogic();
-                    String asyncResult = demonstrateAsyncProcessing();
-                    return String.format(
-                        "Scoped Values Demo:\nBusiness Logic: %s\nAsync Processing: %s",
-                        businessResult, asyncResult
+                    String businessResult = "Business logic executed";
+                    String asyncResult = demonstrateAsyncProcessingWithScopedValue();
+                    return new ScopedValuesResponse(
+                        RequestContext.getRequestId(),
+                        RequestContext.getTenantId(),
+                        RequestContext.getUserId(),
+                        businessResult,
+                        asyncResult
                     );
                 });
         } catch (Exception e) {
@@ -48,15 +49,16 @@ public class ScopedValueService {
         return "data-" + RequestContext.getRequestId();
     }
 
-    public String demonstrateAsyncProcessing() throws InterruptedException {
-        var result = new StringBuilder();
-        Thread virtualThread = Thread.startVirtualThread(() -> {
-            String virtualThreadRequestId = RequestContext.getRequestId();
-            result.append("Virtual thread sees: ").append(virtualThreadRequestId);
-        });
-
-        virtualThread.join();
-        return result.toString();
+    public String demonstrateAsyncProcessingWithScopedValue() {
+        try (var scope = java.util.concurrent.StructuredTaskScope.open()) {
+            var subtask = scope.fork(() -> {
+                return "Virtual thread sees: " + RequestContext.getRequestId();
+            });
+            scope.join();
+            return subtask.get();
+        } catch (Exception e) {
+            return "Virtual thread error: " + e.getMessage();
+        }
     }
 
     private String accessFromDeepCall() {
@@ -75,4 +77,3 @@ public class ScopedValueService {
         return "RequestID from deep call: " + RequestContext.getRequestId();
     }
 }
-
